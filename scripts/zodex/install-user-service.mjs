@@ -178,18 +178,26 @@ export function hashArtifactTree(root) {
 
 function renderService({ appRoot, currentDir, dataDir, envFile, nodeBinary }) {
   const launcher = path.join(currentDir, "scripts/dev/run-standalone.mjs");
-  const quote = (value) => `"${assertSingleLine(value, "systemd path").replaceAll('"', '\\"')}"`;
+  const pathValue = (value) =>
+    assertSingleLine(value, "systemd path")
+      .replaceAll("\\", "\\x5c")
+      .replaceAll(" ", "\\x20")
+      .replaceAll("\t", "\\x09")
+      .replaceAll('"', "\\x22")
+      .replaceAll("'", "\\x27");
+  const quoteArgument = (value) =>
+    `"${assertSingleLine(value, "systemd argument").replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
   return `[Unit]
 Description=Zodex OmniRoute OAuth broker
 After=network-online.target
 Wants=network-online.target
-ConditionPathExists=${launcher}
+ConditionPathExists=${pathValue(launcher)}
 
 [Service]
 Type=simple
-WorkingDirectory=${quote(currentDir)}
-EnvironmentFile=${quote(envFile)}
-ExecStart=${quote(nodeBinary)} ${quote(launcher)}
+WorkingDirectory=${pathValue(currentDir)}
+EnvironmentFile=${pathValue(envFile)}
+ExecStart=${quoteArgument(nodeBinary)} ${quoteArgument(launcher)}
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
@@ -200,8 +208,8 @@ PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadOnlyPaths=${quote(appRoot)}
-ReadWritePaths=${quote(dataDir)}
+ReadOnlyPaths=${pathValue(appRoot)}
+ReadWritePaths=${pathValue(dataDir)}
 ProtectHostname=true
 ProtectClock=true
 ProtectKernelTunables=true

@@ -72,6 +72,11 @@ test("installs a private, disabled, fail-closed user service and is idempotent",
     assert.match(service, /NoNewPrivileges=true/);
     assert.match(service, /ProtectSystem=strict/);
     assert.match(service, /ProtectHome=read-only/);
+    assert.match(
+      service,
+      new RegExp(`WorkingDirectory=${first.currentDir.replaceAll("/", "\\/")}`)
+    );
+    assert.doesNotMatch(service, /WorkingDirectory="/);
     assert.doesNotMatch(service, /JWT_SECRET|STORAGE_ENCRYPTION_KEY|INITIAL_PASSWORD/);
 
     const second = installUserService(options);
