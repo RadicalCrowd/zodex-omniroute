@@ -448,6 +448,32 @@ function patchStandalonePackageJson(resolvedOutDir) {
 }
 
 /**
+ * Next's file tracer can copy a checkout's local environment files into the
+ * standalone root. Those files may contain OAuth or encryption secrets and
+ * must never become part of a distributable artifact. Keep example templates,
+ * but remove runtime env files after every in-place or copied assembly.
+ *
+ * @param {string} resolvedOutDir - assembled standalone output directory
+ * @returns {string[]} removed basenames
+ */
+export function removeStandaloneSecretArtifacts(resolvedOutDir) {
+  if (!fsSync.existsSync(resolvedOutDir)) return [];
+
+  const removed = [];
+  for (const name of fsSync.readdirSync(resolvedOutDir)) {
+    const isRuntimeEnv =
+      name === ".env" ||
+      name === "server.env" ||
+      (name.startsWith(".env.") && !name.endsWith(".example"));
+    if (!isRuntimeEnv) continue;
+
+    fsSync.rmSync(path.join(resolvedOutDir, name), { recursive: true, force: true });
+    removed.push(name);
+  }
+  return removed;
+}
+
+/**
  * Copy <distDir>/static -> outDir/<relDistDir>/static and projectRoot/public -> outDir/public.
  * The static dest mirrors the configured distDir (e.g. .build/next), which is where the
  * standalone server serves /_next/static from. See step 2 in assembleStandalone for why.
@@ -679,6 +705,13 @@ export function assembleStandalone({
   fsSync.mkdirSync(resolvedOutDir, { recursive: true });
   if (resolvedOutDir !== standaloneDir) {
     fsSync.cpSync(standaloneDir, resolvedOutDir, { recursive: true });
+  }
+
+  const removedSecretArtifacts = removeStandaloneSecretArtifacts(resolvedOutDir);
+  if (removedSecretArtifacts.length > 0) {
+    console.log(
+      `[assembleStandalone] Removed secret-bearing runtime env artifact(s): ${removedSecretArtifacts.join(", ")}`
+    );
   }
 
   // 1.5. Standalone server.js is CJS — strip "type":"module" from the copied package.json.

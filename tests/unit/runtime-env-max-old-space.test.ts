@@ -12,7 +12,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { resolveMaxOldSpaceMb } = await import("../../scripts/build/runtime-env.mjs");
+const { applySecureRuntimeUmask, resolveMaxOldSpaceMb } =
+  await import("../../scripts/build/runtime-env.mjs");
+
+test("standalone runtime applies a restrictive POSIX umask", () => {
+  const observed: number[] = [];
+  const previous = applySecureRuntimeUmask("linux", (mode: number) => {
+    observed.push(mode);
+    return 0o022;
+  });
+
+  assert.equal(previous, 0o022);
+  assert.deepEqual(observed, [0o077]);
+  assert.equal(
+    applySecureRuntimeUmask("win32", () => assert.fail("must not set Windows umask")),
+    null
+  );
+});
 
 test("#2939 default is 512 when unset/invalid", () => {
   assert.equal(resolveMaxOldSpaceMb(undefined), 512);

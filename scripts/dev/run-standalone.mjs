@@ -5,10 +5,12 @@ import {
   resolveRuntimePorts,
   withRuntimePortEnv,
   resolveMaxOldSpaceMb,
+  applySecureRuntimeUmask,
   spawnWithForwardedSignals,
 } from "../build/runtime-env.mjs";
 import { bootstrapEnv } from "../build/bootstrap-env.mjs";
 
+applySecureRuntimeUmask();
 const env = bootstrapEnv();
 const runtimePorts = resolveRuntimePorts(env);
 const childEnv = withRuntimePortEnv(env, runtimePorts);

@@ -1,5 +1,19 @@
 import { spawn } from "node:child_process";
 
+/**
+ * Keep secrets and runtime databases private by default on POSIX. The official
+ * standalone launcher calls this before bootstrap or database initialization,
+ * so newly created state files inherit mode 0600 and directories inherit 0700.
+ * Windows does not implement POSIX permission bits, so it is left unchanged.
+ */
+export function applySecureRuntimeUmask(
+  platform = process.platform,
+  setUmask = (mode) => process.umask(mode)
+) {
+  if (platform === "win32") return null;
+  return setUmask(0o077);
+}
+
 export function parsePort(value, fallback) {
   const parsed = Number.parseInt(String(value), 10);
   return Number.isFinite(parsed) && parsed > 0 && parsed <= 65535 ? parsed : fallback;

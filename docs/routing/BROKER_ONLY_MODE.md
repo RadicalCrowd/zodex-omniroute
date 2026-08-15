@@ -1,3 +1,7 @@
+---
+title: "Zodex Broker-Only Mode"
+---
+
 # Zodex Broker-Only Mode
 
 Zodex uses OmniRoute as a local OAuth broker without allowing it to select a

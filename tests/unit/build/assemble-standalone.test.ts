@@ -67,6 +67,10 @@ test("assembleStandalone copies standalone + static + public + sidecars into out
   // minimal fake standalone tree
   fs.mkdirSync(path.join(distDir, "standalone"), { recursive: true });
   fs.writeFileSync(path.join(distDir, "standalone", "server.js"), "// server");
+  fs.writeFileSync(path.join(distDir, "standalone", ".env"), "SECRET=must-not-ship");
+  fs.writeFileSync(path.join(distDir, "standalone", ".env.local"), "SECRET=must-not-ship");
+  fs.writeFileSync(path.join(distDir, "standalone", "server.env"), "SECRET=must-not-ship");
+  fs.writeFileSync(path.join(distDir, "standalone", ".env.example"), "SAFE_TEMPLATE=");
   fs.mkdirSync(path.join(distDir, "static"), { recursive: true });
   fs.writeFileSync(path.join(distDir, "static", "x.js"), "x");
   fs.mkdirSync(path.join(tmp, "public"), { recursive: true });
@@ -92,6 +96,10 @@ test("assembleStandalone copies standalone + static + public + sidecars into out
     "static is NOT placed under a literal .next (would 404 against distDir server)"
   );
   assert.ok(fs.existsSync(path.join(outDir, "public/logo.svg")), "public copied");
+  assert.ok(!fs.existsSync(path.join(outDir, ".env")), "runtime .env is removed");
+  assert.ok(!fs.existsSync(path.join(outDir, ".env.local")), "local runtime .env is removed");
+  assert.ok(!fs.existsSync(path.join(outDir, "server.env")), "bootstrap secrets are removed");
+  assert.ok(fs.existsSync(path.join(outDir, ".env.example")), "safe env template is retained");
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
