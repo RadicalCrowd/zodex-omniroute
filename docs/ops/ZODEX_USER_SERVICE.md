@@ -29,6 +29,8 @@ The installation uses these locations by default:
 The generated environment binds `OMNIROUTE_SERVER_HOST` and `HOSTNAME` to
 `127.0.0.1`, sets `REQUIRE_API_KEY=true`, enables `OMNIROUTE_BROKER_ONLY_MODE`,
 disables `OMNIROUTE_EMERGENCY_FALLBACK`, and generates independent local secrets.
+Unrelated Arena, pricing, free-proxy, development-model, and CLI-profile synchronization
+is explicitly disabled; OAuth credential health and on-demand token handling remain available.
 The environment and unit are mode `0600`; state and installation roots are mode
 `0700`. Runtime `.env` files are excluded from copied artifacts.
 
