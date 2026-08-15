@@ -13,6 +13,7 @@
  */
 
 import { isFeatureFlagEnabled } from "@/shared/utils/featureFlags";
+import { isBrokerOnlyModeEnabled } from "./brokerOnlyMode.ts";
 
 const EMERGENCY_FALLBACK_FLAG_KEY = "OMNIROUTE_EMERGENCY_FALLBACK";
 const EMERGENCY_FALLBACK_FLAG_CACHE_MS = 500;
@@ -122,6 +123,9 @@ export function shouldUseFallback(
   requestHasTools: boolean,
   config: EmergencyFallbackConfig = EMERGENCY_FALLBACK_CONFIG
 ): FallbackResult {
+  if (isBrokerOnlyModeEnabled()) {
+    return { shouldFallback: false, reason: "broker-only mode preserves the requested model" };
+  }
   if (!config.enabled) return { shouldFallback: false, reason: "emergency fallback disabled" };
   if (!isEmergencyFallbackEnvEnabled()) {
     return {

@@ -47,6 +47,7 @@ function resetEnv() {
   delete process.env.INPUT_SANITIZER_ENABLED;
   delete process.env.INPUT_SANITIZER_MODE;
   delete process.env.PII_REDACTION_ENABLED;
+  delete process.env.OMNIROUTE_BROKER_ONLY_MODE;
 }
 
 test.beforeEach(async () => {
@@ -231,6 +232,147 @@ test("handleChat applies task-aware routing when a semantic override is enabled"
   assert.equal(response.status, 200);
   assert.deepEqual(seenAuthHeaders, ["Bearer sk-deepseek-task-route"]);
   assert.equal(json.choices[0].message.content, "Task-routed response");
+});
+
+test("broker-only mode keeps an explicit model when task-aware routing is enabled", async () => {
+  process.env.OMNIROUTE_BROKER_ONLY_MODE = "true";
+  await seedConnection("openai", { apiKey: "sk-openai-broker-only" });
+  await seedConnection("deepseek", { apiKey: "sk-deepseek-broker-only" });
+  setTaskRoutingConfig({
+    enabled: true,
+    detectionEnabled: true,
+    taskModelMap: {
+      ...getDefaultTaskModelMap(),
+      coding: "deepseek/deepseek-v4-flash",
+    },
+  });
+
+  const seenBodies: Array<{ model?: string }> = [];
+  const seenAuthHeaders: Array<string | undefined> = [];
+  globalThis.fetch = async (_url, init = {}) => {
+    seenBodies.push(JSON.parse(String(init.body)));
+    const headers = toPlainHeaders(init.headers);
+    seenAuthHeaders.push(headers.Authorization ?? headers.authorization);
+    return buildOpenAIResponse("Exact model response", "gpt-4.1");
+  };
+
+  const response = await handleChat(
+    buildRequest({
+      body: {
+        model: "openai/gpt-4.1",
+        stream: false,
+        messages: [{ role: "user", content: "Write code to sort this array" }],
+      },
+    })
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(seenAuthHeaders, ["Bearer sk-openai-broker-only"]);
+  assert.equal(seenBodies[0].model, "gpt-4.1");
+});
+
+test("broker-only mode preserves a deprecated model id instead of applying its alias", async () => {
+  process.env.OMNIROUTE_BROKER_ONLY_MODE = "true";
+  await seedConnection("openai", { apiKey: "sk-openai-broker-alias" });
+  const seenBodies: Array<{ model?: string }> = [];
+
+  globalThis.fetch = async (_url, init = {}) => {
+    seenBodies.push(JSON.parse(String(init.body)));
+    return buildOpenAIResponse("Exact deprecated id response", "gpt-4-turbo-preview");
+  };
+
+  const response = await handleChat(
+    buildRequest({
+      body: {
+        model: "openai/gpt-4-turbo-preview",
+        stream: false,
+        messages: [{ role: "user", content: "Keep the exact model id" }],
+      },
+    })
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(seenBodies[0].model, "gpt-4-turbo-preview");
+});
+
+test("broker-only mode rejects combo names without making an upstream request", async () => {
+  process.env.OMNIROUTE_BROKER_ONLY_MODE = "true";
+  await seedConnection("openai", { apiKey: "sk-openai-broker-combo" });
+  await combosDb.createCombo({
+    name: "broker-only-combo",
+    strategy: "priority",
+    config: { maxRetries: 0, retryDelayMs: 0 },
+    models: ["openai/gpt-4.1"],
+  });
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts += 1;
+    return buildOpenAIResponse("must not be called");
+  };
+
+  const response = await handleChat(
+    buildRequest({
+      body: {
+        model: "broker-only-combo",
+        stream: false,
+        messages: [{ role: "user", content: "Do not resolve this combo" }],
+      },
+    })
+  );
+  const json = (await response.json()) as { error: { message: string } };
+
+  assert.equal(response.status, 400);
+  assert.equal(attempts, 0);
+  assert.match(
+    json.error.message,
+    /requires an explicit provider\/model|does not allow combo routing/i
+  );
+});
+
+test("broker-only mode returns the original budget error without emergency fallback", async () => {
+  process.env.OMNIROUTE_BROKER_ONLY_MODE = "true";
+  await seedConnection("openai", { apiKey: "sk-openai-broker-budget" });
+  await seedConnection("nvidia", { apiKey: "sk-nvidia-broker-budget" });
+  let attempts = 0;
+
+  globalThis.fetch = async () => {
+    attempts += 1;
+    return new Response(JSON.stringify({ error: { message: "payment required" } }), {
+      status: 402,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  const response = await handleChat(
+    buildRequest({
+      body: {
+        model: "openai/gpt-4.1",
+        stream: false,
+        messages: [{ role: "user", content: "Preserve this model on failure" }],
+      },
+    })
+  );
+
+  assert.equal(response.status, 402);
+  assert.equal(attempts, 1);
+});
+
+test("broker-only mode rejects a bare model name", async () => {
+  process.env.OMNIROUTE_BROKER_ONLY_MODE = "true";
+
+  const response = await handleChat(
+    buildRequest({
+      body: {
+        model: "gpt-4.1",
+        stream: false,
+        messages: [{ role: "user", content: "Require a provider prefix" }],
+      },
+    })
+  );
+  const json = (await response.json()) as { error: { message: string } };
+
+  assert.equal(response.status, 400);
+  assert.match(json.error.message, /requires an explicit provider\/model/i);
 });
 
 test("handleChat routes exact combo names and can recover via global fallback", async () => {

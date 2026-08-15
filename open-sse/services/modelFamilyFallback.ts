@@ -19,6 +19,7 @@ import {
   isResourceNotFoundResponse,
 } from "./errorClassifier.ts";
 import { getRegistryEntry } from "../config/providerRegistry.ts";
+import { isBrokerOnlyModeEnabled } from "./brokerOnlyMode.ts";
 
 // ── Model Family Definitions ─────────────────────────────────────────────────
 
@@ -188,6 +189,8 @@ export function getNextFamilyFallback(
   currentModel: string,
   triedModels: Set<string>
 ): string | null {
+  if (isBrokerOnlyModeEnabled()) return null;
+
   const parsed = parseModel(currentModel);
   const bareModel = parsed.model || currentModel;
   const provider = parsed.provider || parsed.providerAlias || "";

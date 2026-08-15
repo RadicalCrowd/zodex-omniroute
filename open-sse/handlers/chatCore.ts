@@ -109,6 +109,7 @@ import {
   stripIncompatibleMessageContent,
 } from "../services/modelStrip.ts";
 import { resolveModelAlias } from "../services/modelDeprecation.ts";
+import { isBrokerOnlyModeEnabled } from "../services/brokerOnlyMode.ts";
 import { normalizeMimoThinking } from "../services/mimoThinking.ts";
 import {
   isOpencodeGoProvider,
@@ -683,11 +684,13 @@ export async function handleChatCore({
   // ── Background Task Redirection (T41) — decision extracted to chatCore/backgroundRedirect.ts (#3501)
   // backgroundReason is the detection signal (threaded into memory/skills injection below); redirect
   // is the actual model downgrade to apply, if any.
-  const { backgroundReason, redirect: bgRedirect } = resolveBackgroundTaskRedirect({
+  const brokerOnlyMode = isBrokerOnlyModeEnabled();
+  const { backgroundReason, redirect: detectedBackgroundRedirect } = resolveBackgroundTaskRedirect({
     body,
     headers: clientRawRequest?.headers,
     model,
   });
+  const bgRedirect = brokerOnlyMode ? null : detectedBackgroundRedirect;
   if (bgRedirect) {
     const originalModel = model;
     log?.info?.(
@@ -715,7 +718,7 @@ export async function handleChatCore({
   // Custom aliases take priority over built-in and must be resolved here so the
   // downstream getModelTargetFormat() lookup AND the actual provider request use
   // the correct, aliased model ID. Without this, aliases only affect format detection.
-  const resolvedModel = resolveModelAlias(model);
+  const resolvedModel = brokerOnlyMode ? model : resolveModelAlias(model);
   // Use resolvedModel for all downstream operations (routing, provider requests, logging)
   let effectiveModel = resolvedModel === model ? model : resolvedModel;
   if (resolvedModel !== model) {
@@ -732,7 +735,7 @@ export async function handleChatCore({
   // and non-thinking base models are cleaned up later by normalizeThinkingForModel().
   // Extracted to chatCore/claudeEffortVariant.ts (#3501); mutates body in place and returns the
   // stripped model + an optional log line, keeping behaviour byte-identical.
-  {
+  if (!brokerOnlyMode) {
     const effortVariant = applyClaudeEffortVariant({
       provider,
       effectiveModel,

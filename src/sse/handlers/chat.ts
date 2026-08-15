@@ -92,6 +92,10 @@ import {
 } from "./reasoningRouting";
 import { createVirtualAutoCombo, resolveAutoRoutingState } from "./autoRouting";
 import { getComboFailureLogError } from "./comboFailureLogging";
+import {
+  getBrokerOnlyModelOverrideError,
+  isBrokerOnlyModeEnabled,
+} from "@omniroute/open-sse/services/brokerOnlyMode.ts";
 
 // Pipeline integration — wired modules
 import { classify429FromError, type FailureKind } from "@/shared/utils/classify429";
@@ -274,6 +278,7 @@ export async function handleChat(
   body = normalizeReasoningRequest(body);
 
   const sourceFormat = detectFormatFromUrl(body, request.url);
+  const brokerOnlyMode = isBrokerOnlyModeEnabled();
 
   // Early guard: an invalid `messages` field is rejected here with a clear
   // OmniRoute-level 400 before any routing or upstream call (#5110, #6402).
@@ -394,6 +399,12 @@ export async function handleChat(
   // resolveRoutingModel). The resolved model still passes through
   // enforceApiKeyPolicy below, so it cannot bypass per-key allowlists.
   let modelStr = resolveRoutingModel(request, body);
+  if (brokerOnlyMode && (noThinking.applied || modelStr.startsWith("no-think/"))) {
+    return errorResponse(
+      HTTP_STATUS.BAD_REQUEST,
+      "Broker-only mode requires an explicit provider/model and does not resolve no-think aliases"
+    );
+  }
 
   // cc discovery alias (`claude/<provider>/<model>`, `claude/combo/<name>`):
   // resolve back to the real id before any combo lookup / resolveModelOrError()
@@ -401,8 +412,22 @@ export async function handleChat(
   // real Claude OAuth provider namespace) is always left untouched.
   const ccAliasStrip = await resolveCcDiscoveryAliasStrip(modelStr);
   if (ccAliasStrip.stripped) {
+    if (brokerOnlyMode) {
+      return errorResponse(
+        HTTP_STATUS.BAD_REQUEST,
+        "Broker-only mode requires an explicit provider/model and does not resolve discovery aliases"
+      );
+    }
     log.debug("CC_DISCOVERY", `Resolved cc discovery alias: ${modelStr} → ${ccAliasStrip.model}`);
     modelStr = ccAliasStrip.model;
+  }
+
+  const brokerOnlyRequestedModel = modelStr;
+  if (brokerOnlyMode && !brokerOnlyRequestedModel.includes("/")) {
+    return errorResponse(
+      HTTP_STATUS.BAD_REQUEST,
+      "Broker-only mode requires an explicit provider/model"
+    );
   }
 
   // Freeze the client-facing model and reasoning intent before automatic routers
@@ -526,6 +551,20 @@ export async function handleChat(
     isModelAllowedForKey,
     log,
   }));
+  const guardrailModelOverrideError = getBrokerOnlyModelOverrideError(
+    brokerOnlyRequestedModel,
+    modelStr
+  );
+  const guardrailBodyModelOverrideError = getBrokerOnlyModelOverrideError(
+    brokerOnlyRequestedModel,
+    body?.model
+  );
+  if (guardrailModelOverrideError || guardrailBodyModelOverrideError) {
+    return errorResponse(
+      HTTP_STATUS.BAD_REQUEST,
+      guardrailModelOverrideError || guardrailBodyModelOverrideError
+    );
+  }
   telemetry.endPhase();
 
   // T08: per-key active session limit (0 = unlimited).
@@ -573,6 +612,20 @@ export async function handleChat(
     logTag: "Hook model override",
     log,
   }));
+  const hookModelOverrideError = getBrokerOnlyModelOverrideError(
+    brokerOnlyRequestedModel,
+    modelStr
+  );
+  const hookBodyModelOverrideError = getBrokerOnlyModelOverrideError(
+    brokerOnlyRequestedModel,
+    body?.model
+  );
+  if (hookModelOverrideError || hookBodyModelOverrideError) {
+    return errorResponse(
+      HTTP_STATUS.BAD_REQUEST,
+      hookModelOverrideError || hookBodyModelOverrideError
+    );
+  }
 
   // Short-circuit if a hook returned a direct response
   if (hookResponse) {
@@ -583,7 +636,7 @@ export async function handleChat(
   // Detect the semantic task type and optionally route to the optimal model
   let resolvedModelStr = modelStr;
   let taskRouteInfo: { taskType: string; wasRouted: boolean } | null = null;
-  if (getTaskRoutingConfig().enabled) {
+  if (!brokerOnlyMode && getTaskRoutingConfig().enabled) {
     telemetry.startPhase("task-route");
     const tr = applyTaskAwareRouting(modelStr, body);
     if (tr.wasRouted) {
@@ -605,7 +658,7 @@ export async function handleChat(
   // model (some providers don't implement Anthropic's web_search_20250305 server tool).
   // Settings are read only when a web-search tool is present; the override lands before
   // auto/combo resolution and the layer-1 fallback so the target's own handling applies.
-  if (hasNativeWebSearchTool(body)) {
+  if (!brokerOnlyMode && hasNativeWebSearchTool(body)) {
     const wsSettings = await getCachedSettings().catch(() => ({}) as Record<string, unknown>);
     const wsRoute = resolveWebSearchRouteOverride(resolvedModelStr, body, wsSettings);
     if (wsRoute.wasRouted) {
@@ -622,19 +675,28 @@ export async function handleChat(
   // combo/provider resolution. Existing behavior is untouched when no rule matches.
   let reasoningDecision: ReasoningRuleDecision | null = null;
   let requestRoutingTags: { tags: string[] } = { tags: [] };
-  const reasoningRouting = await applyReasoningRouting({
-    request,
-    body,
-    modelStr: resolvedModelStr,
-    policy,
-    apiKeyInfo,
-    reasoningIntent,
-  });
-  if (reasoningRouting.response) return reasoningRouting.response;
-  body = reasoningRouting.body;
-  resolvedModelStr = reasoningRouting.modelStr;
-  reasoningDecision = reasoningRouting.reasoningDecision;
-  requestRoutingTags = reasoningRouting.requestRoutingTags;
+  if (!brokerOnlyMode) {
+    const reasoningRouting = await applyReasoningRouting({
+      request,
+      body,
+      modelStr: resolvedModelStr,
+      policy,
+      apiKeyInfo,
+      reasoningIntent,
+    });
+    if (reasoningRouting.response) return reasoningRouting.response;
+    body = reasoningRouting.body;
+    resolvedModelStr = reasoningRouting.modelStr;
+    reasoningDecision = reasoningRouting.reasoningDecision;
+    requestRoutingTags = reasoningRouting.requestRoutingTags;
+  }
+
+  if (brokerOnlyMode && (resolvedModelStr === "auto" || resolvedModelStr.startsWith("auto/"))) {
+    return errorResponse(
+      HTTP_STATUS.BAD_REQUEST,
+      "Broker-only mode requires an explicit provider/model and does not allow auto routing"
+    );
+  }
 
   const autoRouting = await resolveAutoRoutingState(resolvedModelStr);
   if (autoRouting.response) return autoRouting.response;
@@ -643,6 +705,12 @@ export async function handleChat(
   telemetry.startPhase("resolve");
   let combo: any = await getComboForModel(resolvedModelStr);
   if (reasoningDecision?.targetCombo) combo = reasoningDecision.targetCombo;
+  if (brokerOnlyMode && combo) {
+    return errorResponse(
+      HTTP_STATUS.BAD_REQUEST,
+      "Broker-only mode requires an explicit provider/model and does not allow combo routing"
+    );
+  }
 
   // "auto" prefix fuzzy matching: "auto/fast" → "auto/best-fast", etc.
   // parseModel splits "auto/fast" into provider="auto" which isn't a real provider.
@@ -961,7 +1029,7 @@ export async function handleChat(
       correlationId: reqId,
       routingComboId,
       reasoningDecision,
-      reasoningIntent,
+      reasoningIntent: brokerOnlyMode ? null : reasoningIntent,
       reasoningRequestTags: requestRoutingTags.tags,
     },
     null,
@@ -1035,6 +1103,12 @@ async function handleSingleModelChat(
   // to combo flow. This handles the case where the auto-fuzzy match in
   // resolveModelOrError found a combo but the main handler's combo lookup missed it.
   if ((resolved as any).combo) {
+    if (isBrokerOnlyModeEnabled()) {
+      return errorResponse(
+        HTTP_STATUS.BAD_REQUEST,
+        "Broker-only mode requires an explicit provider/model and does not allow combo routing"
+      );
+    }
     const redirectCombo = (resolved as any).combo;
     log.info(
       "ROUTING",
