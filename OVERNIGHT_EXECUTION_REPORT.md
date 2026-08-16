@@ -35,6 +35,11 @@ Date: 2026-08-16
 - Ran 16 focused regressions: 16 passed, 0 failed. ESLint, Prettier, syntax checking,
   diff checks, strict documentation checks, and repository commit hooks passed under
   Node.js `22.23.2`.
+- Re-ran the broker-only unit test and Zodex service-installer test: both passed. Ran
+  `tests/integration/codex-chat-reasoning-http-e2e.test.ts` against a temporary local
+  mock upstream in the host namespace: passed. The test confirms `reasoning_effort`
+  is forwarded to the Responses request, reasoning deltas reach the client SSE, and
+  encrypted reasoning content is not exposed.
 - Ran Codex Router doctor in the host namespace: no `FAIL` results, Router health
   `0.4.0-beta.3`, native Codex sign-in authenticated, and 18 routed catalog entries.
   The existing `[kiloFree]` and `[OpencodeFree]` descriptions remain present.
@@ -88,4 +93,6 @@ Date: 2026-08-16
   additively without changing Kilo Free, OpenCode Free, defaults, or native login.
 - Any real provider compatibility request, including text, streaming, tools, reasoning,
   cancellation, or quota inspection, remains a separate quota-consuming gate.
+- The local reasoning-stream contract is verified, but whether a specific Claude OAuth
+  model emits a Codex-renderable reasoning summary still requires a real provider probe.
 - The final Codex Desktop restart remains the owner's action.
