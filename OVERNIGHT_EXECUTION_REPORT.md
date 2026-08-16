@@ -40,6 +40,12 @@ Date: 2026-08-16
   mock upstream in the host namespace: passed. The test confirms `reasoning_effort`
   is forwarded to the Responses request, reasoning deltas reach the client SSE, and
   encrypted reasoning content is not exposed.
+- Extended Zodex Router's isolated OmniRoute contract so a native
+  `response.reasoning_summary_text.delta` and completed reasoning summary traverse
+  Router and its authenticated API forwarder unchanged. The opt-in integration passed
+  1/1, Router syntax checks passed, and the full Router suite passed 1,234 tests with
+  0 failures and 10 skips. Router commit `e334b96` was pushed without installing the
+  fork or contacting a provider.
 - Ran Codex Router doctor in the host namespace: no `FAIL` results, Router health
   `0.4.0-beta.3`, native Codex sign-in authenticated, and 18 routed catalog entries.
   The existing `[kiloFree]` and `[OpencodeFree]` descriptions remain present.
